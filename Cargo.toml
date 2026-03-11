@@ -1,0 +1,8 @@
+[package]
+name = "consensus-simulation"
+version = "0.1.0"
+edition = "2026"
+
+[dependencies]
+sha2 = "0.10.9"
+tokio = { version = "1.50.0", features = ["full"] }

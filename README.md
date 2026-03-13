@@ -7,6 +7,89 @@ Implements Pipelined HotStuff step-by-step, then reproduces and fixes the MonadB
 
 ---
 
+## Background: Consensus and MonadBFT
+
+*Condensed from [A Primer on Blockchain Consensus Mechanisms](https://kaijuneer.medium.com/a-primer-on-blockchain-consensus-mechanisms-eb8115fe1291) — Kai Jun Eer (2025)*
+
+### How consensus works
+
+Nodes in a distributed system communicate by message passing — messages can be lost, delayed, or reordered, and some nodes may be actively malicious. Consensus lets honest nodes agree on the current state and advance the chain despite this.
+
+Most BFT protocols use **two voting phases**:
+
+```mermaid
+sequenceDiagram
+    participant L as Leader
+    participant R as Replicas
+
+    L->>R: Proposal (prevote phase)
+    R->>L: Prevotes
+    Note over L: collects 2f+1 prevotes → QC
+    L->>R: QC (precommit phase)
+    R->>R: collect 2f+1 precommits → COMMIT
+```
+
+One phase isn't enough: after prevotes, a node can't know whether *other* nodes also collected a quorum (messages may have been lost). The second phase confirms that at least a quorum of nodes saw the quorum — "a quorum of a quorum" — before committing.
+
+**Quorum = ⌈2/3⌉ of votes.** This tolerates up to ⅓ byzantine nodes: to produce two conflicting quorums simultaneously, an attacker would need at least ⅓ of votes on both sides — impossible with fewer than ⅓ faulty nodes.
+
+---
+
+### Tendermint → HotStuff → MonadBFT
+
+```mermaid
+flowchart TD
+    T[Tendermint\nQuadratic messaging\nEvery node → every node]
+    H[HotStuff / DiemBFT\nLinear messaging\nAll votes → leader → QC]
+    P[Pipelined HotStuff\nProposal n+1 embeds QC for n\nReduces round-trip count]
+    M[MonadBFT\nFixes tailfork\nTimeout carries last voted tip\nNext leader must repropose or prove no-QC]
+
+    T -->|bottleneck at scale| H
+    H -->|reduce round-trips| P
+    P -->|tailfork vulnerability| M
+```
+
+| Protocol | Communication | Problem solved | Remaining issue |
+|----------|--------------|----------------|-----------------|
+| Tendermint | O(n²) — each node → all nodes | Early BFT on chain | Doesn't scale |
+| HotStuff | O(n) — all votes → leader | Scale | Two round-trips per block |
+| Pipelined HotStuff | O(n), overlapped phases | Round-trip count | Tailfork |
+| **MonadBFT** | O(n), overlapped phases | **Tailfork** | — |
+
+---
+
+### The tailfork problem
+
+In pipelined HotStuff, proposal `n+1` *includes* the QC for proposal `n`. This means the QC for `n` only becomes durable once `n+1` is proposed. If the leader for `n+1` is offline or withholds their proposal, the QC for block `n` is silently discarded — even though quorum was reached.
+
+```
+Block n:   [QC forms ✓] ─── but next leader goes silent
+Block n+1: [never proposed] → QC for block n disappears
+Block n+1': new leader proposes a competing block — tail of chain rewrites
+```
+
+This is a **tail reorg**: the last committed block can be silently replaced by a new leader.
+
+**MonadBFT's fix:** timeout messages must include the tip of the last proposal the node voted for. The next leader must either:
+- **Repropose** the most recent block from the timeout messages (carry the QC forward), or
+- **Prove** that no quorum was reached (and only then propose a new block)
+
+This makes it impossible to discard a block that reached quorum simply because the next leader is unresponsive or adversarial.
+
+---
+
+### Why this matters for MEV
+
+MEV (Maximal Extractable Value) is value captured by reordering, inserting, or censoring transactions. Tail reorgs are a direct MEV vector:
+
+1. Block `n` contains a profitable transaction (e.g. a large DEX trade)
+2. Malicious leader at `n+1` lets the QC for `n` expire (tailfork)
+3. They repropose a competing block `n'` with the same transaction repositioned — front-running it, or censoring it in favour of their own
+
+MonadBFT eliminates this class of attack: **once a block reaches quorum, the repropose rule guarantees it is carried forward**. A leader cannot selectively orphan a quorum'd block to extract value from its transactions. This makes transaction ordering more predictable and significantly raises the cost of tail-based MEV strategies.
+
+---
+
 ## Architecture
 
 ### Message flow

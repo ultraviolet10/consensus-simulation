@@ -1,7 +1,13 @@
 [package]
 name = "consensus-simulation"
 version = "0.1.0"
-edition = "2026"
+edition = "2024"
+
+[lints.clippy]
+# Warn on common beginner pitfalls
+unwrap_used = "warn"          # prefer expect("reason") or proper error handling
+clone_on_ref_ptr = "warn"     # accidental Arc/Rc clones
+enum_glob_use = "warn"        # avoid `use Foo::*`
 
 [dependencies]
 sha2 = "0.10.9"

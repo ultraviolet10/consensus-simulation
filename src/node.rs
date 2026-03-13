@@ -6,6 +6,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::types::{Block, Command, Message, NodeId, QuorumCertificate, Vote};
 
+
 pub struct NodeState {
     pub id: NodeId,
 
@@ -46,12 +47,10 @@ impl NodeState {
         }
     }
 
-    // Stage 3: fixed leader (node 1) for all heights.
-    // This keeps the pipeline simple while we build the bus and runner.
-    // Round-robin rotation is introduced in Stage 4, alongside QC propagation.
-    // The `_height` prefix suppresses the unused-variable warning.
-    pub fn leader_for_height(&self, _height: u64) -> NodeId {
-        NodeId(1)
+    // Round-robin: height 0 → node 1, height 1 → node 2, …
+    // NodeIds are 1-based.
+    pub fn leader_for_height(&self, height: u64) -> NodeId {
+        NodeId((height % self.n_nodes as u64) + 1)
     }
 
     // Minimum votes needed to form a QC.
@@ -71,6 +70,7 @@ impl NodeState {
             Message::Proposal(block) => self.handle_proposal(block),
             Message::VoteMsg(vote) => self.handle_vote(vote),
             Message::Timeout(t) => self.handle_timeout(t),
+            Message::NewQC(qc) => self.handle_new_qc(qc),
         }
     }
 
@@ -186,19 +186,41 @@ impl NodeState {
 
         let mut commands = vec![];
 
-        // Emit Commit if we have the block (we should — we proposed it).
-        if let Some(block) = self.pending_blocks.get(&vote.block_hash) {
-            commands.push(Command::Commit(block.clone()));
+        // remove() gives us ownership of the block directly (no clone needed).
+        if let Some(block) = self.pending_blocks.remove(&vote.block_hash) {
+            commands.push(Command::Commit(block));
         }
 
-        // If we're also the leader of the next height, propose immediately.
-        // Otherwise the runner will call propose() on whoever is next leader.
-        let next_leader = self.leader_for_height(self.height);
-        if self.id == next_leader {
-            commands.extend(self.propose());
-        }
+        // Broadcast the QC to all nodes so they can update their locked_qc.
+        // The next leader will also call propose() upon receiving it (see handle_new_qc).
+        // This replaces the old "if I'm next leader, propose now" logic —
+        // keeping all nodes in sync on locked_qc is required for round-robin rotation.
+        commands.push(Command::Broadcast(Message::NewQC(qc)));
 
         commands
+    }
+
+    fn handle_new_qc(&mut self, qc: &QuorumCertificate) -> Vec<Command> {
+        // Ignore if we already have a QC at this height or higher.
+        // (The leader that formed this QC will receive its own broadcast — this guards that.)
+        let already_have = self
+            .locked_qc
+            .as_ref()
+            .map_or(false, |lqc| lqc.height >= qc.height);
+        if already_have {
+            return vec![];
+        }
+
+        // Update our view of the chain tip.
+        self.locked_qc = Some(qc.clone());
+        self.height = qc.height + 1;
+
+        // If we're the leader for the new height, kick off the next proposal.
+        if self.id == self.leader_for_height(self.height) {
+            return self.propose();
+        }
+
+        vec![]
     }
 
     fn handle_timeout(&mut self, _t: &crate::types::TimeoutMsg) -> Vec<Command> {

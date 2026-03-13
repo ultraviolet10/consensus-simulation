@@ -30,7 +30,10 @@ Implement Pipelined HotStuff first, then MonadBFT's tailfork fix.
 - Each stage in a separate commit. Don't skip ahead.
 
 ## Current Stage
-[update this as you go]
+**Stage 4 complete** — `DropTransformer` + round-robin leader rotation + `Message::NewQC` propagation.
+Two scenarios: happy path (4 commits) and node 4 offline (3 commits, quorum still met).
+Offline leader (node 4 at height 3) causes stall — motivates Stage 5.
+Next: Stage 5 — timeout/view-change so an offline leader doesn't stall progress.
 
 ## Key Invariants
 - A QC requires votes from 2f+1 nodes (f = byzantine fault tolerance)

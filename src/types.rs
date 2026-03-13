@@ -102,6 +102,10 @@ pub enum Message {
     Proposal(Block),
     VoteMsg(Vote),
     Timeout(TimeoutMsg),
+    // Broadcast by the leader once a QC is formed.
+    // Every node updates its locked_qc on receipt.
+    // The next leader also kicks off the next proposal.
+    NewQC(QuorumCertificate),
 }
 
 // --- Envelope ---

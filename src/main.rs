@@ -5,15 +5,17 @@ mod transformer;
 mod types;
 
 use runner::SimulationRunner;
-use transformer::PassthruTransformer;
+use transformer::{DropTransformer, PassthruTransformer};
+use types::NodeId;
 
-// `#[tokio::main]` is a proc-macro that rewrites main() into:
-//   fn main() { tokio::runtime::Runtime::new().unwrap().block_on(async { ... }) }
-// It sets up the async runtime so we can use `.await` inside main.
 #[tokio::main]
 async fn main() {
-    println!("=== Stage 3: MessageBus + PassthruTransformer ===\n");
+    println!("=== Scenario 1: Happy path (all 4 nodes online) ===\n");
+    SimulationRunner::new(4, PassthruTransformer).run(4).await;
 
-    // 4 nodes, happy path (no drops/delays), run until 3 blocks committed.
-    SimulationRunner::new(4, PassthruTransformer).run(3).await;
+    println!("\n=== Scenario 2: Node 4 offline (DropTransformer) ===");
+    println!("f=1, quorum=3 — heights 0-2 use leaders 1,2,3 so consensus proceeds");
+    println!("(height 3 would stall: leader=node4 is offline — timeout/view-change is Stage 5)\n");
+    // Only 3 commits: leaders at heights 0,1,2 are nodes 1,2,3 — all online.
+    SimulationRunner::new(4, DropTransformer { drop_from: NodeId(4) }).run(3).await;
 }

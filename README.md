@@ -7,9 +7,7 @@ Implements Pipelined HotStuff step-by-step, then reproduces and fixes the MonadB
 
 ---
 
-## Background: Consensus and MonadBFT
-
-*Condensed from [A Primer on Blockchain Consensus Mechanisms](https://kaijuneer.medium.com/a-primer-on-blockchain-consensus-mechanisms-eb8115fe1291) — Kai Jun Eer (2025)*
+## Background
 
 ### How consensus works
 
